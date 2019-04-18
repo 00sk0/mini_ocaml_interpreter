@@ -29,7 +29,5 @@ let interpreter ic =
 let () =
   interpret {|
     1 + 2 * 3;;
-    let f = fun x -> fun y -> x + 2 * y in f 10;;
-    let f = fun x -> fun y -> x + 2 * y in f 10 100;;
   |};
   interpreter stdin
