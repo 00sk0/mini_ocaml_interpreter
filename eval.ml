@@ -8,7 +8,7 @@ type exp =
 | LInt of int
 | LBool of bool
 | Var of string
-| Fun of (string * exp)
+| Fun of (string * typ * exp)
 | App of (exp * exp)
 | LOpAdd of (exp * exp)
 | LOpMul of (exp * exp)
@@ -51,13 +51,13 @@ let rec string_of_exp = function
 (* | Let (x,v,body) -> sprintf "let %s = %s in %s" x (string_of_exp v) (string_of_exp body)
 | LetRec (f,x,v,body) -> sprintf "let rec %s %s = %s in %s" f x (string_of_exp v) (string_of_exp body)
  *)
-| Fun (var,cont) -> sprintf "fun %s -> %s" var (string_of_exp cont)
+| Fun (var,typ,cont) -> sprintf "fun (%s:%s) -> %s" var (string_of_typ typ) (string_of_exp cont)
 | App (e1,e2) -> sprintf "((%s) (%s))" (string_of_exp e1) (string_of_exp e2)
 | LOpAdd (e1,e2) -> sprintf "%s + %s" (string_of_exp e1) (string_of_exp e2)
 | LOpMul (e1,e2) -> sprintf "%s * %s" (string_of_exp e1) (string_of_exp e2)
 | IF (cond,csq,alt) -> sprintf "if %s then %s else %s" (string_of_exp cond) (string_of_exp csq) (string_of_exp alt)
 | Equal (e1,e2) -> sprintf "%s = %s" (string_of_exp e1) (string_of_exp e2)
-let rec string_of_env env =
+and string_of_env env =
   sprintf "{%s}" @@ Env.fold (fun k v t acc ->
     acc ^ k ^ "=" ^ (string_of_value v) ^ ":" ^ (string_of_typ t) ^ ";") env ""
 and string_of_value = function
@@ -78,7 +78,7 @@ let string_ast_of_exp =
   | LInt _ | LBool _ | Var _ -> string_of_exp exp
   (* | Let (x,v,body) -> sprintf "Let(%s,%s,%s)" x (lp v) (lp body)
   | LetRec (f,x,v,body) -> sprintf "LetRec(%s,%s,%s,%s)" f x (lp v) (lp body) *)
-  | Fun (var,cont) -> sprintf "Fun(%s,%s)" var (lp cont)
+  | Fun (var,typ,cont) -> sprintf "Fun(%s,%s,%s)" var (string_of_typ typ) (lp cont)
   | App (e1,e2) -> sprintf "App(%s,%s)" (lp e1) (lp e2)
   | LOpAdd (e1,e2) -> sprintf "Add(%s,%s)" (lp e1) (lp e2)
   | LOpMul (e1,e2) -> sprintf "Mul(%s,%s)" (lp e1) (lp e2)
@@ -90,8 +90,8 @@ let rec typechk exp env = match exp with
 | LInt _ -> TInt
 | LBool _ -> TBool
 | Var x -> Frm.find x env.tenv
-| Fun (x,e) ->
-  let tx = Frm.find x env.tenv in
+| Fun (x,tx,e) ->
+  (* let tx = Frm.find x env.tenv in *)
   let te = typechk e env in
   TArrow (tx,te)
 | App (e1,e2) ->
@@ -121,7 +121,7 @@ let rec eval exp (env:env) = match exp with
 | LetRec (f,x,v,body) ->
   let env' = Frm.add f (VProcRec {rname=f; rvar=x; rcont=v; renv=env}) env in
   eval body env' *)
-| Fun (var,cont) -> VProc {var; cont; env}
+| Fun (var,typ,cont) -> VProc {var; cont; env}
 | App (e1,e2) -> (
   let ftyp  = typechk e1 env in
   let vtyp  = typechk e2 env in
