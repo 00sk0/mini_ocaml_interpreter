@@ -1,4 +1,6 @@
-module Frm = Map.Make(String)
+module Frm = struct
+  include Map.Make(String)
+end
 
 exception VariableNotFound of string
 exception TypeError
@@ -8,7 +10,7 @@ type exp =
 | LInt of int
 | LBool of bool
 | Var of string
-| Fun of (string * typ * exp)
+| Fun of (string * exp)
 | App of (exp * exp)
 | LOpAdd of (exp * exp)
 | LOpMul of (exp * exp)
@@ -31,6 +33,7 @@ and vproc_rec = {
   rcont: exp }
 and typ =
 | TInt | TBool | TArrow of (typ * typ)
+| TVar of string
 
 module Env = struct
   type t = env
@@ -40,6 +43,8 @@ module Env = struct
     venv=Frm.add key v venv;
     tenv=Frm.add key t tenv }
   let fold f {venv;tenv} acc =
+    (* asserts #venv >= #tenv.
+      #venv > #tenv when type-inferencing *)
     Frm.fold (fun key v acc ->
       f key v (Frm.find key tenv) acc) venv acc
 end
@@ -51,7 +56,7 @@ let rec string_of_exp = function
 (* | Let (x,v,body) -> sprintf "let %s = %s in %s" x (string_of_exp v) (string_of_exp body)
 | LetRec (f,x,v,body) -> sprintf "let rec %s %s = %s in %s" f x (string_of_exp v) (string_of_exp body)
  *)
-| Fun (var,typ,cont) -> sprintf "fun (%s:%s) -> %s" var (string_of_typ typ) (string_of_exp cont)
+| Fun (var,cont) -> sprintf "fun (%s) -> %s" var (string_of_exp cont)
 | App (e1,e2) -> sprintf "((%s) (%s))" (string_of_exp e1) (string_of_exp e2)
 | LOpAdd (e1,e2) -> sprintf "%s + %s" (string_of_exp e1) (string_of_exp e2)
 | LOpMul (e1,e2) -> sprintf "%s * %s" (string_of_exp e1) (string_of_exp e2)
@@ -72,13 +77,14 @@ and string_of_typ = function
 | TInt -> "int"
 | TBool -> "bool"
 | TArrow (u,v) -> sprintf "%s -> %s" (string_of_typ u) (string_of_typ v)
+| TVar t -> t
 
 let string_ast_of_exp =
   let rec lp exp = match exp with
   | LInt _ | LBool _ | Var _ -> string_of_exp exp
   (* | Let (x,v,body) -> sprintf "Let(%s,%s,%s)" x (lp v) (lp body)
   | LetRec (f,x,v,body) -> sprintf "LetRec(%s,%s,%s,%s)" f x (lp v) (lp body) *)
-  | Fun (var,typ,cont) -> sprintf "Fun(%s,%s,%s)" var (string_of_typ typ) (lp cont)
+  | Fun (var,cont) -> sprintf "Fun(%s,%s)" var (lp cont)
   | App (e1,e2) -> sprintf "App(%s,%s)" (lp e1) (lp e2)
   | LOpAdd (e1,e2) -> sprintf "Add(%s,%s)" (lp e1) (lp e2)
   | LOpMul (e1,e2) -> sprintf "Mul(%s,%s)" (lp e1) (lp e2)
@@ -90,8 +96,8 @@ let rec typechk exp env = match exp with
 | LInt _ -> TInt
 | LBool _ -> TBool
 | Var x -> Frm.find x env.tenv
-| Fun (x,tx,e) ->
-  (* let tx = Frm.find x env.tenv in *)
+| Fun (x,e) ->
+  let tx = Frm.find x env.tenv in
   let te = typechk e env in
   TArrow (tx,te)
 | App (e1,e2) ->
@@ -111,6 +117,29 @@ let rec typechk exp env = match exp with
   let t,s = typechk e1 env,typechk e2 env in
   if t=s then TBool else raise TypeError
 
+let rec typeinf exp env = match exp with
+| LInt _  -> (env,TInt)
+| LBool _ -> (env,TBool)
+| Var x -> (match Frm.find_opt x env.tenv with
+  | Some t1 -> (env,t1)
+  | None ->
+    let t1 = TVar ("'" ^ x) in
+    ({env with tenv=Frm.add x t1 env.tenv},t1))
+| LOpAdd (e1,e2) ->
+  let env,t1 = typeinf e1 env in
+  let env = {env with tenv=match t1 with
+  | TInt -> env.tenv
+  | TVar x -> Frm.add x TInt env.tenv
+  | _ -> raise TypeError
+  } in
+  let env,t2 = typeinf e2 env in
+  let env = {env with tenv=match t2 with
+  | TInt -> env.tenv
+  | TVar x -> Frm.add x TInt env.tenv
+  | _ -> raise TypeError
+  } in (env,TInt)
+| _ -> raise TypeError
+
 let rec eval exp (env:env) = match exp with
 | LInt v -> VInt v
 | LBool b -> VBool b
@@ -121,7 +150,7 @@ let rec eval exp (env:env) = match exp with
 | LetRec (f,x,v,body) ->
   let env' = Frm.add f (VProcRec {rname=f; rvar=x; rcont=v; renv=env}) env in
   eval body env' *)
-| Fun (var,typ,cont) -> VProc {var; cont; env}
+| Fun (var,cont) -> VProc {var; cont; env}
 | App (e1,e2) -> (
   let ftyp  = typechk e1 env in
   let vtyp  = typechk e2 env in
@@ -153,8 +182,10 @@ let interpret ls0 =
     List.iter (fun exp ->
       Printf.(
         eprintf "%s\n%!" @@ string_ast_of_exp exp;
-        eprintf "t: %s\n%!" @@ string_of_typ   @@ typechk exp Env.empty;
-        eprintf "-> %s\n%!" @@ string_of_value @@ eval exp Env.empty)
+        (* eprintf "t: %s\n%!" @@ string_of_typ   @@ typechk exp Env.empty;
+        eprintf "-> %s\n%!" @@ string_of_value @@ eval exp Env.empty; *)
+        (* eprintf "ti:%s\n%!" @@ string_of_typ @@ snd @@ typeinf exp Env.empty *)
+      )
     ) ls) ls0
 
 
