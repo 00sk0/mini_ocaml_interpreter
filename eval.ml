@@ -107,32 +107,6 @@ let string_ast_of_exp =
   | Equal (e1,e2) -> sprintf "%s = %s" (lp e1) (lp e2)
   in lp
 
-(* let rec typechk exp env = match exp with
-| LInt _ -> TInt
-| LBool _ -> TBool
-| Var x -> Frm.find x env.tenv
-| Fun (x,e) ->
-  let tx = Frm.find x env.tenv in
-  let te = typechk e env in
-  TArrow (tx,te)
-| App (e1,e2) ->
-  let t1 = typechk e1 env in
-  let t2 = typechk e2 env in (
-    match t1 with
-    | TArrow (u,v) when u=t2 -> v
-    | _ -> raise TypeError )
-| LOpAdd (e1,e2) | LOpMul (e1,e2) -> (
-  match typechk e1 env,typechk e2 env with
-  | TInt,TInt -> TInt | _ -> raise TypeError)
-| IF (e1,e2,e3) ->
-  let t,s = typechk e2 env,typechk e3 env in
-  if typechk e1 env = TBool && t=s then t
-  else raise TypeError
-| Equal (e1,e2) ->
-  let t,s = typechk e1 env,typechk e2 env in
-  if t=s then TBool else raise TypeError
-| Let _ | LetRec _ -> failwith "to be implemented" *)
-
 exception UnifyError
 let rec subst_ty t theta = (* substantiate t using theta *)
   match t with
@@ -188,8 +162,6 @@ let rec typeinf =
   | Var x -> (match Frm.find_opt x env.tenv with
     | Some t1 -> (env,t1,theta_def)
     | None ->
-      (* let t1 = new_tvar x in
-      ({env with tenv=Frm.add x t1 env.tenv},t1,theta_def)) *)
       failwith @@ "variable " ^ x ^ " not found")
   | LOpAdd (e1,e2) | LOpMul (e1,e2) | LOpSub (e1,e2) ->
     let env,t1,th1 = typeinf e1 env in
@@ -247,67 +219,24 @@ let rec typeinf =
     fst @@ typeinf_lrec lr env
 and typeinf_lrec exp env = match exp with
   | LetRec (f,x,v,body) ->
-    (* let p = string_of_typ in *)
-
     let tx = new_tvar x in
     let tv = new_tvar "v" in
     let tf = TArrow (tx,tv) in
     let tb = new_tvar "b" in
     let env = {env with tenv=Frm.add x tx @@ Frm.add f tf env.tenv} in
+
     let env,tv2,th1 = typeinf v env in
-    (* Printf.eprintf "%s v. %s\n%!" (p tv) (p tv2);
-
-    Printf.eprintf "%s %s %s %s\n%!"
-      (p tx)
-      (p tv)
-      (p tf)
-      (p tb)
-    ; *)
     let th2 = unify [tv2,tv] in
-    (* prerr_endline @@ Frm.sprint p th1;
-    prerr_endline @@ Frm.sprint p th2;
-    prerr_endline @@ Frm.sprint p @@ compose_subst th1 th2;
-    prerr_endline @@ Frm.sprint p @@ compose_subst th2 th1; *)
     let thr = compose_subst th1 th2 in
-    (* prerr_endline @@ Frm.sprint p thr; *)
-    (* let tx = subst_ty tx thr in
-    let tv = subst_ty tv thr in *)
     let tf = subst_ty tf thr in
     let tb = subst_ty tb thr in
-    (* Printf.eprintf "%s %s %s %s\n%!"
-      (p tx)
-      (p tv)
-      (p tf)
-      (p tb)
-    ; *)
     let env = {env with tenv=Frm.add x tx @@ Frm.add f tf env.tenv} in
-    let env,tb2,th1 = typeinf body env in
-    (* Printf.eprintf "%s v. %s\n%!" (p tb) (p tb2);
-    prerr_endline @@ Frm.sprint p th1;
 
-    Printf.eprintf "%s %s %s %s\n%!"
-      (p tx)
-      (p tv)
-      (p tf)
-      (p tb)
-    ; *)
+    let env,tb2,th1 = typeinf body env in
     let th2 = unify [tb,tb2] in
-    (* prerr_endline @@ Frm.sprint p th1;
-    prerr_endline @@ Frm.sprint p th2;
-    prerr_endline @@ Frm.sprint p @@ compose_subst th1 th2;
-    prerr_endline @@ Frm.sprint p @@ compose_subst th2 th1; *)
     let thr = compose_subst th2 (compose_subst th1 thr) in
-    (* prerr_endline @@ Frm.sprint p thr; *)
-    (* let tx = subst_ty tx thr in
-    let tv = subst_ty tv thr in *)
     let tf = subst_ty tf thr in
     let tb = subst_ty tb thr in
-    (* Printf.eprintf "%s %s %s %s\n%!"
-      (p tx)
-      (p tv)
-      (p tf)
-      (p tb)
-    ; *)
     let env = {env with tenv=Frm.remove x @@ Frm.remove f env.tenv} in
     let env = {env with tenv=subst_tfrm thr env.tenv} in
     (env,tb,thr),tf
@@ -324,11 +253,6 @@ let rec eval exp (env:env) = match exp with
   let env' = Env.add x v t env in
   eval body env'
 | LetRec (f,x,v,body) as lrec ->
-  (* let env,tf,_ = typeinf v env in
-  let env' = Env.add f
-    (VProcRec {rname=f; rvar=x; rcont=v; renv=env}) tf env in
-  eval body env' *)
-  (* let env,typ,th = typeinf lrec env in *)
   let _,tf = typeinf_lrec lrec env in
   let env' = Env.add f
     (VProcRec {rname=f; rvar=x; rcont=v; renv=env}) tf env in
