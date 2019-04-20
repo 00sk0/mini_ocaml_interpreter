@@ -31,5 +31,6 @@ let () =
     1 + 2 * 3;;
     (fun f -> fun x -> f (f x));;
     fun x -> fun y -> fun z -> (x y) (z (y+1));;
+    fun x -> fun y -> fun z -> z (x y = y z);;
   |};
   interpreter stdin

@@ -9,10 +9,6 @@ module Frm = struct
       fold (fun k v acc ->
         acc ^ (sprintf "%s:%s;" k (printer v))
       ) frm ""
-  let ( *> ) f g x = g (f x)
-  let ( <* ) f g x = f (g x)
-  let print printer frm =
-    print_endline @@ sprint printer frm
 end
 
 type exp =
@@ -220,12 +216,19 @@ let rec typeinf =
     let env,t2,th2 = typeinf e2 env in
     let t = new_tvar "@" in
     let t1' = subst_ty t1 th2 in (* simplify t1 *)
-    let th3 = unify [t1',TArrow(t2,t)] in (* exist t s.t. t1 ~ t2->t ? *)
+    let th3 = unify [t1',TArrow(t2,t)] in (* exist t s.t. t1 = t2->t ? *)
     let t'  = subst_ty t th3 in (* specify t *)
     let env = {env with tenv=subst_tfrm th3 env.tenv} in
     let th4 = compose_subst th3 (compose_subst th2 th1) in
     (env,t',th4)
-  | _ -> failwith "to be implemented"
+  | Equal (e1,e2) ->
+    let env,t1,th1 = typeinf e1 env in
+    let env,t2,th2 = typeinf e2 env in
+    let t1' = subst_ty t1 th2 in
+    let th3 = unify [t1',t2] in
+    let th4 = compose_subst th3 (compose_subst th2 th1) in
+    (env,TBool,th4)
+  (* | _ -> failwith "to be implemented" *)
 
 let rec eval exp (env:env) = match exp with
 | LInt v -> VInt v
