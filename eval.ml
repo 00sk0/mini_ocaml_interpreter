@@ -68,7 +68,7 @@ let rec string_of_exp = function
 | App (e1,e2) -> sprintf "(%s) (%s)" (string_of_exp e1) (string_of_exp e2)
 | LOpAdd (e1,e2) -> sprintf "%s + %s" (string_of_exp e1) (string_of_exp e2)
 | LOpSub (e1,e2) -> sprintf "%s - %s" (string_of_exp e1) (string_of_exp e2)
-| LOpMul (e1,e2) -> sprintf "%s * %s" (string_of_exp e1) (string_of_exp e2)
+| LOpMul (e1,e2) -> sprintf "(%s) * (%s)" (string_of_exp e1) (string_of_exp e2)
 | If (cond,csq,alt) -> sprintf "if %s then %s else %s" (string_of_exp cond) (string_of_exp csq) (string_of_exp alt)
 | Equal (e1,e2) -> sprintf "%s = %s" (string_of_exp e1) (string_of_exp e2)
 and string_of_env env =

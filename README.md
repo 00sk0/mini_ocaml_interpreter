@@ -2,7 +2,10 @@
 
 Toy OCaml interpreter with type inference
 
-```
+```shell
+$ make
+...
+
 (1 + 2 * 3) * 6;;
 Mul(Add(1,Mul(2,3)),6)
   typ : int
