@@ -20,8 +20,9 @@ type exp =
 | Fun of (string * exp)
 | App of (exp * exp)
 | LOpAdd of (exp * exp)
+| LOpSub of (exp * exp)
 | LOpMul of (exp * exp)
-| IF of (exp * exp * exp)
+| If of (exp * exp * exp)
 | Equal of (exp * exp)
 and value =
 | VInt of int
@@ -66,8 +67,9 @@ let rec string_of_exp = function
 | Fun (var,cont) -> sprintf "fun %s -> %s" var (string_of_exp cont)
 | App (e1,e2) -> sprintf "(%s) (%s)" (string_of_exp e1) (string_of_exp e2)
 | LOpAdd (e1,e2) -> sprintf "%s + %s" (string_of_exp e1) (string_of_exp e2)
+| LOpSub (e1,e2) -> sprintf "%s - %s" (string_of_exp e1) (string_of_exp e2)
 | LOpMul (e1,e2) -> sprintf "%s * %s" (string_of_exp e1) (string_of_exp e2)
-| IF (cond,csq,alt) -> sprintf "if %s then %s else %s" (string_of_exp cond) (string_of_exp csq) (string_of_exp alt)
+| If (cond,csq,alt) -> sprintf "if %s then %s else %s" (string_of_exp cond) (string_of_exp csq) (string_of_exp alt)
 | Equal (e1,e2) -> sprintf "%s = %s" (string_of_exp e1) (string_of_exp e2)
 and string_of_env env =
   sprintf "{%s}" @@ Env.fold (fun k v t acc ->
@@ -99,8 +101,9 @@ let string_ast_of_exp =
   | Fun (var,cont) -> sprintf "Fun(%s,%s)" var (lp cont)
   | App (e1,e2) -> sprintf "App(%s,%s)" (lp e1) (lp e2)
   | LOpAdd (e1,e2) -> sprintf "Add(%s,%s)" (lp e1) (lp e2)
+  | LOpSub (e1,e2) -> sprintf "Sub(%s,%s)" (lp e1) (lp e2)
   | LOpMul (e1,e2) -> sprintf "Mul(%s,%s)" (lp e1) (lp e2)
-  | IF (cond,csq,alt) -> sprintf "IF(%s,%s,%s)" (lp cond) (lp csq) (lp alt)
+  | If (cond,csq,alt) -> sprintf "IF(%s,%s,%s)" (lp cond) (lp csq) (lp alt)
   | Equal (e1,e2) -> sprintf "%s = %s" (lp e1) (lp e2)
   in lp
 
@@ -188,7 +191,7 @@ let rec typeinf =
       (* let t1 = new_tvar x in
       ({env with tenv=Frm.add x t1 env.tenv},t1,theta_def)) *)
       failwith @@ "variable " ^ x ^ " not found")
-  | LOpAdd (e1,e2) | LOpMul (e1,e2) ->
+  | LOpAdd (e1,e2) | LOpMul (e1,e2) | LOpSub (e1,e2) ->
     let env,t1,th1 = typeinf e1 env in
     let env,t2,th2 = typeinf e2 env in
     let t1' = subst_ty t1 th2 in (* simplify t1 using th2 *)
@@ -196,7 +199,7 @@ let rec typeinf =
     let env = {env with tenv=subst_tfrm th3 env.tenv} in (* rewrite tenv using th3 *)
     let th4 = compose_subst th3 (compose_subst th2 th1) (* compose th1,th2,th3 *)
     in (env,TInt,th4)
-  | IF (cond,csq,alt) ->
+  | If (cond,csq,alt) ->
     let env,t1,th1 = typeinf cond env in
     let th90 = unify [t1,TBool] in
     let env = {env with tenv=subst_tfrm th90 env.tenv} in
@@ -341,10 +344,13 @@ let rec eval exp (env:env) = match exp with
 | LOpAdd (e1,e2) -> (match eval e1 env, eval e2 env with
   | VInt u,VInt v -> VInt (u+v)
   | _ -> raise TypeError)
+| LOpSub (e1,e2) -> (match eval e1 env, eval e2 env with
+  | VInt u,VInt v -> VInt (u-v)
+  | _ -> raise TypeError)
 | LOpMul (e1,e2) -> (match eval e1 env, eval e2 env with
   | VInt u,VInt v -> VInt (u*v)
   | _ -> raise TypeError)
-| IF (cond, csq, alt) -> (match eval cond env with
+| If (cond, csq, alt) -> (match eval cond env with
   | VBool true  -> eval csq env
   | VBool false -> eval alt env
   | _ -> raise TypeError)

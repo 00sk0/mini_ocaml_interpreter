@@ -28,7 +28,7 @@ let () =
     fun x -> fun y -> fun z -> (x y) (z (y+1));;
     let x = fun u -> fun v -> u v in fun u -> u x;;
     let rec f x = fun y -> f x = 0 in f;;
-
+    let rec f x = if x = 0 then 0 else x + f (x-1) in f;;
   |};
 
   (* let rec f x = fun y -> f y y in f 0;; *)

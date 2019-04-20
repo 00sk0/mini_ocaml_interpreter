@@ -1,13 +1,13 @@
 %token <int> NUMBER
 %token <string> VARIABLE
 %token LEFT_PAREN RIGHT_PAREN EOF
-%token PLUS LET EQUAL IN FUN RARROW REC IF THEN ELSE TRUE FALSE ASTERISK SEMICOL
+%token PLUS MINUS LET EQUAL IN FUN RARROW REC IF THEN ELSE TRUE FALSE ASTERISK SEMICOL
 
 /* low priority */
 %nonassoc RARROW IN ELSE
 /* %left SEMICOL */
 %left EQUAL
-%left PLUS
+%left PLUS MINUS
 %left ASTERISK
 %left VARIABLE NUMBER TRUE FALSE LEFT_PAREN
 /* high priority */
@@ -35,12 +35,13 @@ arg_exp:
 exp:
   | e=arg_exp   {e}
   | e1=exp PLUS e2=exp  {Eval.LOpAdd (e1, e2)}
+  | e1=exp MINUS e2=exp {Eval.LOpSub (e1, e2)}
   | e1=exp ASTERISK e2=exp  {Eval.LOpMul (e1, e2)}
   | e1=exp EQUAL e2=exp         {Eval.Equal (e1, e2)}
   | func=exp arg=arg_exp        {Eval.App (func,arg)}
   | FUN x=VARIABLE RARROW body=exp  {Eval.Fun (x,body)}
   | LET x=VARIABLE EQUAL v=exp IN body=exp  {Eval.Let (x,v,body)}
   | LET REC f=VARIABLE x=VARIABLE EQUAL v=exp IN body=exp {Eval.LetRec (f,x,v,body)}
-  | IF cond=exp THEN csq=exp ELSE alt=exp {Eval.IF (cond,csq,alt)}
+  | IF cond=exp THEN csq=exp ELSE alt=exp {Eval.If (cond,csq,alt)}
 ;
 
