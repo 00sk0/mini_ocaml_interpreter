@@ -6,17 +6,14 @@ let rec parse lexbuf =
   | Some v -> v :: (parse lexbuf)
   | None -> []
 
-let interpret =
-  Lexing.from_string *> parse *> Eval.interpret
+let interpret ?(loop=false) str =
+  Lexing.from_string *> parse *> Eval.interpret ~loop @@ str
 
 let interpreter ic =
   let rec loop input =
     try
       let input = input ^ "\n" ^ (input_line ic) in
-      (* begin try
-        interpret input;
-      with Parse.Error -> loop input end; *)
-      interpret input;
+      interpret ~loop:true input;
       loop ""
     with
     | End_of_file | Exit -> ()
@@ -28,9 +25,15 @@ let interpreter ic =
 
 let () =
   interpret {|
+    fun x -> fun y -> fun z -> (x y) (z (y+1));;
+    let x = fun u -> fun v -> u v in fun u -> u x;;
+  |};
+  (* interpret {|
     1 + 2 * 3;;
     (fun f -> fun x -> f (f x));;
     fun x -> fun y -> fun z -> (x y) (z (y+1));;
     fun x -> fun y -> fun z -> z (x y = y z);;
-  |};
+    let x = fun u -> fun v -> u v in fun u -> u x;;
+    let x = fun u -> fun v -> u v in fun u -> x u;;
+  |}; *)
   interpreter stdin

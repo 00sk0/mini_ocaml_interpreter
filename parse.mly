@@ -39,8 +39,8 @@ exp:
   | e1=exp EQUAL e2=exp         {Eval.Equal (e1, e2)}
   | func=exp arg=arg_exp        {Eval.App (func,arg)}
   | FUN x=VARIABLE RARROW body=exp  {Eval.Fun (x,body)}
-  /* | LET x=VARIABLE EQUAL v=exp IN body=exp  {Eval.Let (x,v,body)}
-  | LET REC f=VARIABLE x=VARIABLE EQUAL v=exp IN body=exp {Eval.LetRec (f,x,v,body)} */
+  | LET x=VARIABLE EQUAL v=exp IN body=exp  {Eval.Let (x,v,body)}
+  | LET REC f=VARIABLE x=VARIABLE EQUAL v=exp IN body=exp {Eval.LetRec (f,x,v,body)}
   | IF cond=exp THEN csq=exp ELSE alt=exp {Eval.IF (cond,csq,alt)}
 ;
 
