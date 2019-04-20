@@ -202,13 +202,15 @@ let rec typeinf =
   | If (cond,csq,alt) ->
     let env,t1,th1 = typeinf cond env in
     let th90 = unify [t1,TBool] in
-    let env = {env with tenv=subst_tfrm th90 env.tenv} in
+    let th1 = compose_subst th90 th1 in
+    let env = {env with tenv=subst_tfrm th1 env.tenv} in
     let env,t2,th2 = typeinf csq env in
     let env,t3,th3 = typeinf alt env in
+    let t2 = subst_ty t2 th3 in
     let th91 = unify [t2,t3] in
-    let t2' = subst_ty t2 th91 in
-    let env = {env with tenv=subst_tfrm th91 env.tenv} in
     let th = compose_subst th91 (compose_subst th90 (compose_subst th3 (compose_subst th2 th1))) in
+    let t2' = subst_ty t2 th in
+    let env = {env with tenv=subst_tfrm th env.tenv} in
     (env,t2',th)
   | Fun (x,e) ->
     let t = new_tvar x in
@@ -246,6 +248,7 @@ let rec typeinf =
 and typeinf_lrec exp env = match exp with
   | LetRec (f,x,v,body) ->
     (* let p = string_of_typ in *)
+
     let tx = new_tvar x in
     let tv = new_tvar "v" in
     let tf = TArrow (tx,tv) in
@@ -267,8 +270,8 @@ and typeinf_lrec exp env = match exp with
     prerr_endline @@ Frm.sprint p @@ compose_subst th2 th1; *)
     let thr = compose_subst th1 th2 in
     (* prerr_endline @@ Frm.sprint p thr; *)
-    let tx = subst_ty tx thr in
-    let tv = subst_ty tv thr in
+    (* let tx = subst_ty tx thr in
+    let tv = subst_ty tv thr in *)
     let tf = subst_ty tf thr in
     let tb = subst_ty tb thr in
     (* Printf.eprintf "%s %s %s %s\n%!"
@@ -295,8 +298,8 @@ and typeinf_lrec exp env = match exp with
     prerr_endline @@ Frm.sprint p @@ compose_subst th2 th1; *)
     let thr = compose_subst th2 (compose_subst th1 thr) in
     (* prerr_endline @@ Frm.sprint p thr; *)
-    let tx = subst_ty tx thr in
-    let tv = subst_ty tv thr in
+    (* let tx = subst_ty tx thr in
+    let tv = subst_ty tv thr in *)
     let tf = subst_ty tf thr in
     let tb = subst_ty tb thr in
     (* Printf.eprintf "%s %s %s %s\n%!"
@@ -306,6 +309,7 @@ and typeinf_lrec exp env = match exp with
       (p tb)
     ; *)
     let env = {env with tenv=Frm.remove x @@ Frm.remove f env.tenv} in
+    let env = {env with tenv=subst_tfrm thr env.tenv} in
     (env,tb,thr),tf
   | _ -> raise @@ Invalid_argument "typeinf_lrec"
 
