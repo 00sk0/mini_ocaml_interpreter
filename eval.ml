@@ -1,10 +1,19 @@
-module Frm = struct
-  include Map.Make(String)
-end
-
 exception VariableNotFound of string
 exception TypeError
 let sprintf = Printf.sprintf
+
+module Frm = struct
+  include Map.Make(String)
+  let sprint printer frm =
+    sprintf "[%s]" @@
+      fold (fun k v acc ->
+        acc ^ (sprintf "%s:%s;" k (printer v))
+      ) frm ""
+  let ( *> ) f g x = g (f x)
+  let ( <* ) f g x = f (g x)
+  let print printer frm =
+    print_endline @@ sprint printer frm
+end
 
 type exp =
 | LInt of int
@@ -117,6 +126,68 @@ let rec typechk exp env = match exp with
   let t,s = typechk e1 env,typechk e2 env in
   if t=s then TBool else raise TypeError
 
+exception UnifyError
+let rec subst_ty t theta = (* resolve t using theta *)
+  match t with
+  | TInt -> TInt
+  | TBool -> TBool
+  | TArrow (t1,t2) -> TArrow (subst_ty t1 theta, subst_ty t2 theta)
+  | TVar x -> (match Frm.find_opt x theta with
+    | Some t -> t
+    | None -> TVar x)
+let rec subst_tfrm theta_new frm = (* rewrite frm *)
+  Frm.map (fun t -> subst_ty t theta_new) frm
+let compose_subst theta_new theta = (* rewrite + add what is only in theta_new *)
+  let theta' = subst_tfrm theta_new theta in
+  let ret = Frm.fold (fun x t tau ->
+    Printf.eprintf "  %s:%s in tau[%s]? --> %b\n%!"
+      x
+      (string_of_typ t)
+      (Frm.fold (fun x t acc -> acc ^ x ^ ":" ^ (string_of_typ t) ^ ";") theta "")
+      (match Frm.find_opt x theta with Some _->true|None->false)
+    ;
+    match Frm.find_opt x theta with
+    | Some _ -> tau
+    | None -> Frm.add x t tau
+  ) theta_new theta' in
+  let p = Frm.sprint string_of_typ in
+  Printf.eprintf "\
+theta  : %s
+theta+ : %s
+theta' : %s
+theta* : %s
+%!"
+  (p theta) (p theta_new) (p theta') (p ret)
+; ret
+  (* Frm.fold (fun x t tau ->
+    Frm.add x t tau
+  ) theta' theta_new *)
+let rec occurs t1 t2 = (* t1 shouldn't occur in t2 *)
+  if t1=t2 then true
+  else match t2 with
+  | TArrow (u,v) -> occurs t1 u || occurs t1 v
+  | _ -> false
+let unify ls =
+  let of_ls = List.fold_left (fun acc (x,t) -> Frm.add x t acc) Frm.empty in
+  let subst_eql theta =
+    List.map (fun (t1,t2) -> subst_ty t1 theta, subst_ty t2 theta)
+  in
+  let rec solve ls theta = match ls with
+  | [] -> theta
+  | (t1,t2)::tl ->
+    if t1=t2 then solve tl theta
+    else (match t1,t2 with
+    | TArrow (p,q), TArrow (r,s) ->
+      solve ((p,r)::(q,s)::tl) theta
+    | (TVar x as t1), t2 | t2, (TVar x as t1) ->
+      if occurs t1 t2 then raise UnifyError
+      else solve
+        (subst_eql (of_ls [x,t2]) tl)
+        (compose_subst (of_ls [x,t2]) theta)
+    | _ -> raise UnifyError)
+  in solve ls Frm.empty
+
+
 let rec typeinf exp env = match exp with
 | LInt _  -> (env,TInt)
 | LBool _ -> (env,TBool)
@@ -125,7 +196,7 @@ let rec typeinf exp env = match exp with
   | None ->
     let t1 = TVar ("'" ^ x) in
     ({env with tenv=Frm.add x t1 env.tenv},t1))
-| LOpAdd (e1,e2) ->
+| LOpAdd (e1,e2) | LOpMul (e1,e2) ->
   let env,t1 = typeinf e1 env in
   let env = {env with tenv=match t1 with
   | TInt -> env.tenv
@@ -138,7 +209,7 @@ let rec typeinf exp env = match exp with
   | TVar x -> Frm.add x TInt env.tenv
   | _ -> raise TypeError
   } in (env,TInt)
-| _ -> raise TypeError
+| _ -> failwith "to be implemented"
 
 let rec eval exp (env:env) = match exp with
 | LInt v -> VInt v
@@ -184,10 +255,22 @@ let interpret ls0 =
         eprintf "%s\n%!" @@ string_ast_of_exp exp;
         (* eprintf "t: %s\n%!" @@ string_of_typ   @@ typechk exp Env.empty;
         eprintf "-> %s\n%!" @@ string_of_value @@ eval exp Env.empty; *)
-        (* eprintf "ti:%s\n%!" @@ string_of_typ @@ snd @@ typeinf exp Env.empty *)
+        (* eprintf "ti:%s\n%!" @@ string_of_typ @@ snd @@ typeinf exp Env.empty; *)
       )
     ) ls) ls0
 
+let test () =
+  let pr = Frm.print string_of_typ in
+  pr @@ unify [TInt, TInt];
+  pr @@ unify [TVar "'a", TBool];
+  pr @@ unify [TVar "'a", TVar "'b"];
+  pr @@ unify [(TArrow(TVar("'a"),TVar("'b")), TArrow(TVar("'b"), TVar("'c")))];
+  pr @@ unify [
+    TArrow (TVar "a", TVar "b"),
+    TArrow (TVar "c", TVar "d")
+  ]
+
+  (* pr @@ unify [TVar "a", TVar "b"]; *)
 
 
 

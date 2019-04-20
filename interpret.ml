@@ -27,6 +27,7 @@ let interpreter ic =
   in loop ""
 
 let () =
+  Eval.test ();
   interpret {|
     1 + 2 * 3;;
   |};
