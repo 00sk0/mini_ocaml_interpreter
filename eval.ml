@@ -173,11 +173,11 @@ let unify ls =
     | _ -> raise UnifyError)
   in solve ls Frm.empty
 
+let count_tvar = ref @@ -1
+let new_tvar x =
+  TVar (incr count_tvar; "'" ^ x ^ (string_of_int !count_tvar))
 let rec typeinf =
   let theta_def = Frm.empty in
-  let count = ref @@ -1 in
-  let new_tvar x =
-    TVar (incr count; "'" ^ x ^ (string_of_int !count)) in
   fun exp env ->
   match exp with
   | LInt _  -> (env,TInt,theta_def)
@@ -187,7 +187,7 @@ let rec typeinf =
     | None ->
       (* let t1 = new_tvar x in
       ({env with tenv=Frm.add x t1 env.tenv},t1,theta_def)) *)
-      raise Not_found)
+      failwith @@ "variable " ^ x ^ " not found")
   | LOpAdd (e1,e2) | LOpMul (e1,e2) ->
     let env,t1,th1 = typeinf e1 env in
     let env,t2,th2 = typeinf e2 env in
@@ -238,7 +238,74 @@ let rec typeinf =
     let env = {env with tenv=Frm.remove x env.tenv} in
     let th3 = compose_subst th2 th1 in
     (env,t2,th3)
-  | LetRec _ -> failwith "to be implemented"
+  | LetRec (f,x,v,body) as lr ->
+    fst @@ typeinf_lrec lr env
+and typeinf_lrec exp env = match exp with
+  | LetRec (f,x,v,body) ->
+    (* let p = string_of_typ in *)
+    let tx = new_tvar x in
+    let tv = new_tvar "v" in
+    let tf = TArrow (tx,tv) in
+    let tb = new_tvar "b" in
+    let env = {env with tenv=Frm.add x tx @@ Frm.add f tf env.tenv} in
+    let env,tv2,th1 = typeinf v env in
+    (* Printf.eprintf "%s v. %s\n%!" (p tv) (p tv2);
+
+    Printf.eprintf "%s %s %s %s\n%!"
+      (p tx)
+      (p tv)
+      (p tf)
+      (p tb)
+    ; *)
+    let th2 = unify [tv2,tv] in
+    (* prerr_endline @@ Frm.sprint p th1;
+    prerr_endline @@ Frm.sprint p th2;
+    prerr_endline @@ Frm.sprint p @@ compose_subst th1 th2;
+    prerr_endline @@ Frm.sprint p @@ compose_subst th2 th1; *)
+    let thr = compose_subst th1 th2 in
+    (* prerr_endline @@ Frm.sprint p thr; *)
+    let tx = subst_ty tx thr in
+    let tv = subst_ty tv thr in
+    let tf = subst_ty tf thr in
+    let tb = subst_ty tb thr in
+    (* Printf.eprintf "%s %s %s %s\n%!"
+      (p tx)
+      (p tv)
+      (p tf)
+      (p tb)
+    ; *)
+    let env = {env with tenv=Frm.add x tx @@ Frm.add f tf env.tenv} in
+    let env,tb2,th1 = typeinf body env in
+    (* Printf.eprintf "%s v. %s\n%!" (p tb) (p tb2);
+    prerr_endline @@ Frm.sprint p th1;
+
+    Printf.eprintf "%s %s %s %s\n%!"
+      (p tx)
+      (p tv)
+      (p tf)
+      (p tb)
+    ; *)
+    let th2 = unify [tb,tb2] in
+    (* prerr_endline @@ Frm.sprint p th1;
+    prerr_endline @@ Frm.sprint p th2;
+    prerr_endline @@ Frm.sprint p @@ compose_subst th1 th2;
+    prerr_endline @@ Frm.sprint p @@ compose_subst th2 th1; *)
+    let thr = compose_subst th2 (compose_subst th1 thr) in
+    (* prerr_endline @@ Frm.sprint p thr; *)
+    let tx = subst_ty tx thr in
+    let tv = subst_ty tv thr in
+    let tf = subst_ty tf thr in
+    let tb = subst_ty tb thr in
+    (* Printf.eprintf "%s %s %s %s\n%!"
+      (p tx)
+      (p tv)
+      (p tf)
+      (p tb)
+    ; *)
+    let env = {env with tenv=Frm.remove x @@ Frm.remove f env.tenv} in
+    (env,tb,thr),tf
+  | _ -> raise @@ Invalid_argument "typeinf_lrec"
+
 
 let rec eval exp (env:env) = match exp with
 | LInt v -> VInt v
@@ -249,10 +316,16 @@ let rec eval exp (env:env) = match exp with
   let v = eval v env in
   let env' = Env.add x v t env in
   eval body env'
-| LetRec _ -> failwith "to be implemented"
-(* | LetRec (f,x,v,body) ->
-  let env' = Frm.add f (VProcRec {rname=f; rvar=x; rcont=v; renv=env}) env in
+| LetRec (f,x,v,body) as lrec ->
+  (* let env,tf,_ = typeinf v env in
+  let env' = Env.add f
+    (VProcRec {rname=f; rvar=x; rcont=v; renv=env}) tf env in
   eval body env' *)
+  (* let env,typ,th = typeinf lrec env in *)
+  let _,tf = typeinf_lrec lrec env in
+  let env' = Env.add f
+    (VProcRec {rname=f; rvar=x; rcont=v; renv=env}) tf env in
+  eval body env'
 | Fun (var,cont) -> VProc {var; cont; env}
 | App (e1,e2) -> (
   let env,ftyp,_  = typeinf e1 env in

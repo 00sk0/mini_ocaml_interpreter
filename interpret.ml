@@ -6,8 +6,8 @@ let rec parse lexbuf =
   | Some v -> v :: (parse lexbuf)
   | None -> []
 
-let interpret ?(loop=false) str =
-  Lexing.from_string *> parse *> Eval.interpret ~loop @@ str
+let interpret ?(loop=false) =
+  Lexing.from_string *> parse *> Eval.interpret ~loop
 
 let interpreter ic =
   let rec loop input =
@@ -27,7 +27,11 @@ let () =
   interpret {|
     fun x -> fun y -> fun z -> (x y) (z (y+1));;
     let x = fun u -> fun v -> u v in fun u -> u x;;
+    let rec f x = fun y -> f x = 0 in f;;
+
   |};
+
+  (* let rec f x = fun y -> f y y in f 0;; *)
   (* interpret {|
     1 + 2 * 3;;
     (fun f -> fun x -> f (f x));;
