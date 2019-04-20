@@ -74,6 +74,10 @@ let rec string_of_exp = function
 and string_of_env env =
   sprintf "{%s}" @@ Env.fold (fun k v t acc ->
     acc ^ k ^ "=" ^ (string_of_value v) ^ ":" ^ (string_of_typ t) ^ ";") env ""
+and string_of_tenv {tenv;_} =
+  sprintf "{%s}" @@ Frm.fold (fun k t acc ->
+    acc ^ k ^ ":" ^ (string_of_typ t) ^ ";"
+  ) tenv ""
 and string_of_value = function
 | VInt n -> string_of_int n
 | VBool b -> string_of_bool b
@@ -85,7 +89,8 @@ and string_of_value = function
 and string_of_typ = function
 | TInt -> "int"
 | TBool -> "bool"
-| TArrow (u,v) -> sprintf "%s -> %s" (string_of_typ u) (string_of_typ v)
+| TArrow (TArrow _ as u, v) -> sprintf "(%s)->%s" (string_of_typ u) (string_of_typ v)
+| TArrow (u,v) -> sprintf "%s->%s" (string_of_typ u) (string_of_typ v)
 | TVar t -> t
 
 let string_ast_of_exp =
@@ -127,7 +132,7 @@ let rec typechk exp env = match exp with
   if t=s then TBool else raise TypeError
 
 exception UnifyError
-let rec subst_ty t theta = (* resolve t using theta *)
+let rec subst_ty t theta = (* simplify t using theta *)
   match t with
   | TInt -> TInt
   | TBool -> TBool
@@ -139,29 +144,11 @@ let rec subst_tfrm theta_new frm = (* rewrite frm *)
   Frm.map (fun t -> subst_ty t theta_new) frm
 let compose_subst theta_new theta = (* rewrite + add what is only in theta_new *)
   let theta' = subst_tfrm theta_new theta in
-  let ret = Frm.fold (fun x t tau ->
-    Printf.eprintf "  %s:%s in tau[%s]? --> %b\n%!"
-      x
-      (string_of_typ t)
-      (Frm.fold (fun x t acc -> acc ^ x ^ ":" ^ (string_of_typ t) ^ ";") theta "")
-      (match Frm.find_opt x theta with Some _->true|None->false)
-    ;
+  Frm.fold (fun x t tau ->
     match Frm.find_opt x theta with
     | Some _ -> tau
     | None -> Frm.add x t tau
-  ) theta_new theta' in
-  let p = Frm.sprint string_of_typ in
-  Printf.eprintf "\
-theta  : %s
-theta+ : %s
-theta' : %s
-theta* : %s
-%!"
-  (p theta) (p theta_new) (p theta') (p ret)
-; ret
-  (* Frm.fold (fun x t tau ->
-    Frm.add x t tau
-  ) theta' theta_new *)
+  ) theta_new theta'
 let rec occurs t1 t2 = (* t1 shouldn't occur in t2 *)
   if t1=t2 then true
   else match t2 with
@@ -187,29 +174,58 @@ let unify ls =
     | _ -> raise UnifyError)
   in solve ls Frm.empty
 
-
-let rec typeinf exp env = match exp with
-| LInt _  -> (env,TInt)
-| LBool _ -> (env,TBool)
-| Var x -> (match Frm.find_opt x env.tenv with
-  | Some t1 -> (env,t1)
-  | None ->
-    let t1 = TVar ("'" ^ x) in
-    ({env with tenv=Frm.add x t1 env.tenv},t1))
-| LOpAdd (e1,e2) | LOpMul (e1,e2) ->
-  let env,t1 = typeinf e1 env in
-  let env = {env with tenv=match t1 with
-  | TInt -> env.tenv
-  | TVar x -> Frm.add x TInt env.tenv
-  | _ -> raise TypeError
-  } in
-  let env,t2 = typeinf e2 env in
-  let env = {env with tenv=match t2 with
-  | TInt -> env.tenv
-  | TVar x -> Frm.add x TInt env.tenv
-  | _ -> raise TypeError
-  } in (env,TInt)
-| _ -> failwith "to be implemented"
+let rec typeinf =
+  let theta_def = Frm.empty in
+  let count = ref @@ -1 in
+  let new_tvar x =
+    TVar (incr count; "'" ^ x ^ (string_of_int !count)) in
+  fun exp env ->
+  match exp with
+  | LInt _  -> (env,TInt,theta_def)
+  | LBool _ -> (env,TBool,theta_def)
+  | Var x -> (match Frm.find_opt x env.tenv with
+    | Some t1 -> (env,t1,theta_def)
+    | None ->
+      let t1 = new_tvar x in
+      ({env with tenv=Frm.add x t1 env.tenv},t1,theta_def))
+  | LOpAdd (e1,e2) | LOpMul (e1,e2) ->
+    let env,t1,th1 = typeinf e1 env in
+    let env,t2,th2 = typeinf e2 env in
+    let t1' = subst_ty t1 th2 in (* simplify t1 using th2 *)
+    let th3 = unify [t1',TInt; t2,TInt] in (* typecheck *)
+    let env = {env with tenv=subst_tfrm th3 env.tenv} in (* rewrite tenv using th3 *)
+    let th4 = compose_subst th3 (compose_subst th2 th1) (* compose th1,th2,th3 *)
+    in (env,TInt,th4)
+  | IF (cond,csq,alt) ->
+    let env,t1,th1 = typeinf cond env in
+    let th90 = unify [t1,TBool] in
+    (* let t1' = subst_ty t1 th90 in *)
+    let env = {env with tenv=subst_tfrm th90 env.tenv} in
+    let env,t2,th2 = typeinf csq env in
+    let env,t3,th3 = typeinf alt env in
+    let th91 = unify [t2,t3] in
+    let t2' = subst_ty t2 th91 in
+    let env = {env with tenv=subst_tfrm th91 env.tenv} in
+    let th = compose_subst th91 (compose_subst th90 (compose_subst th3 (compose_subst th2 th1))) in
+    (env,t2',th)
+  | Fun (x,e) ->
+    let t = new_tvar x in
+    let env = {env with tenv=Frm.add x t env.tenv} in (* define/undefine x in order to evaluate e *)
+    let env,t1,th1 = typeinf e env in
+    let t' = subst_ty t th1 in (* simplify t *)
+    let env = {env with tenv=Frm.remove x env.tenv} in
+    (env,TArrow(t',t1),th1)
+  | App (e1,e2) ->
+    let env,t1,th1 = typeinf e1 env in
+    let env,t2,th2 = typeinf e2 env in
+    let t = new_tvar "@" in
+    let t1' = subst_ty t1 th2 in (* simplify t1 *)
+    let th3 = unify [t1',TArrow(t2,t)] in (* exist t s.t. t1 ~ t2->t ? *)
+    let t'  = subst_ty t th3 in (* specify t *)
+    let env = {env with tenv=subst_tfrm th3 env.tenv} in
+    let th4 = compose_subst th3 (compose_subst th2 th1) in
+    (env,t',th4)
+  | _ -> failwith "to be implemented"
 
 let rec eval exp (env:env) = match exp with
 | LInt v -> VInt v
@@ -248,29 +264,23 @@ let rec eval exp (env:env) = match exp with
   | VBool u,VBool v -> VBool (u=v)
   | _ -> raise TypeError)
 
+
 let interpret ls0 =
+  let string_of_typeinf_res exp =
+    let env,typ,th = typeinf exp Env.empty in
+    sprintf "  typ : %s
+  th  : %s
+  tenv : %s" (string_of_typ typ) (Frm.sprint string_of_typ th) (string_of_tenv env)
+  in
   List.iter (fun ls ->
     List.iter (fun exp ->
       Printf.(
-        eprintf "%s\n%!" @@ string_ast_of_exp exp;
-        (* eprintf "t: %s\n%!" @@ string_of_typ   @@ typechk exp Env.empty;
-        eprintf "-> %s\n%!" @@ string_of_value @@ eval exp Env.empty; *)
-        (* eprintf "ti:%s\n%!" @@ string_of_typ @@ snd @@ typeinf exp Env.empty; *)
+        printf "%s\n%!" @@ string_ast_of_exp exp;
+        printf "%s\n%!" @@ string_of_typeinf_res exp;
+        printf "-> %s\n%!" @@ string_of_value @@ eval exp Env.empty;
       )
     ) ls) ls0
 
-let test () =
-  let pr = Frm.print string_of_typ in
-  pr @@ unify [TInt, TInt];
-  pr @@ unify [TVar "'a", TBool];
-  pr @@ unify [TVar "'a", TVar "'b"];
-  pr @@ unify [(TArrow(TVar("'a"),TVar("'b")), TArrow(TVar("'b"), TVar("'c")))];
-  pr @@ unify [
-    TArrow (TVar "a", TVar "b"),
-    TArrow (TVar "c", TVar "d")
-  ]
-
-  (* pr @@ unify [TVar "a", TVar "b"]; *)
 
 
 

@@ -27,8 +27,9 @@ let interpreter ic =
   in loop ""
 
 let () =
-  Eval.test ();
   interpret {|
     1 + 2 * 3;;
+    (fun f -> fun x -> f (f x));;
+    fun x -> fun y -> fun z -> (x y) (z (y+1));;
   |};
   interpreter stdin
