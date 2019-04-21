@@ -34,7 +34,7 @@ LetRec(f,x,IF(x = 0,0,Add(x,App(f,Sub(x,1)))),f)
   tenv : {}
 -> fun_rec(f)[{}] x -> if x = 0 then 0 else x + (f) (x - 1)
 
-let rec f x = let rec g a = if x=0 then a else f (x-1) (a+x) in g in f;;
+let rec f x = let rec g a = if x=0 then a else f (x-1) (a+x) in g in f (* tail recursive *);;
 LetRec(f,x,LetRec(g,a,IF(x = 0,a,App(App(f,Sub(x,1)),Add(a,x))),g),f)
   typ : int->int->int
   th  : ['@28:int->int;'@29:int;'a25:int;'b24:int->int->int;'b27:int->int;'v23:int->int;'v26:int;'x22:int;]

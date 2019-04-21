@@ -14,6 +14,7 @@ let white  = (' ' | '\n' | '\t')*
 
 rule read = parse
 | white       {read lexbuf}
+| "(*"        {comment lexbuf}
 | '+'         {PLUS}
 | '-'         {MINUS}
 | '='         {EQUAL}
@@ -33,4 +34,7 @@ rule read = parse
 | var as s    {VARIABLE s}
 | _           {raise @@ SyntaxError ("unexpected: " ^ Lexing.lexeme lexbuf)}
 | eof         {EOF}
+and comment = parse
+| "*)"        {read lexbuf}
+| _           {comment lexbuf}
 
