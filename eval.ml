@@ -16,6 +16,7 @@ type exp =
 | LBool of bool
 | Var of string
 | Let of (string * exp * exp)
+| LetGlobal of (string * exp)
 | LetRec of (string * string * exp * exp)
 | Fun of (string * exp)
 | App of (exp * exp)
@@ -29,19 +30,21 @@ and value =
 | VBool of bool
 | VProc of vproc
 | VProcRec of vproc_rec
-and ret = value
+| VUnit
+and ret = value * env
 and env = {
-  venv: ret Frm.t;
+  venv: value Frm.t;
   tenv: typ Frm.t
 } and vproc = {
   var: string; env: env;
-  cont: exp }
-and vproc_rec = {
+  cont: exp
+} and vproc_rec = {
   rvar: string; renv: env; rname: string;
-  rcont: exp }
-and typ =
+  rcont: exp
+} and typ =
 | TInt | TBool | TArrow of (typ * typ)
 | TVar of string
+| TUnit
 
 module Env = struct
   type t = env
@@ -50,12 +53,20 @@ module Env = struct
   let add key v t {venv;tenv} = {
     venv=Frm.add key v venv;
     tenv=Frm.add key t tenv }
-  let fold f {venv;tenv} acc =
-    assert (Frm.cardinal tenv >= Frm.cardinal venv);
-    (* asserts #venv >= #tenv.
-      #venv > #tenv when type-inferencing *)
-    Frm.fold (fun key v acc ->
-      f key v (Frm.find key tenv) acc) venv acc
+  let fold f {venv;tenv} (acc:string) : string =
+    (* Printf.eprintf "#venv=%d v. #tenv=%d\n%!"
+      (Frm.cardinal venv)
+      (Frm.cardinal tenv)
+    ; *)
+    let m = Frm.merge (fun key v t -> match v,t with
+    | Some v, Some t -> Some (Some v, Some t)
+    | Some v, None   -> Some (Some v, None)
+    | None,   Some t -> Some (None,   Some t)
+    | None,   None   -> Some (None,   None)
+    ) venv tenv in
+    Frm.fold (fun key (ov,ot) acc ->
+      f key ov ot acc
+    ) m acc
 end
 
 let rec string_of_exp = function
@@ -63,6 +74,7 @@ let rec string_of_exp = function
 | LBool b -> string_of_bool b
 | Var x -> x
 | Let (x,v,body) -> sprintf "let %s = %s in %s" x (string_of_exp v) (string_of_exp body)
+| LetGlobal (x,v) -> sprintf "let %s = %s" x (string_of_exp v)
 | LetRec (f,x,v,body) -> sprintf "let rec %s %s = %s in %s" f x (string_of_exp v) (string_of_exp body)
 | Fun (var,cont) -> sprintf "fun %s -> %s" var (string_of_exp cont)
 | App (e1,e2) -> sprintf "(%s) (%s)" (string_of_exp e1) (string_of_exp e2)
@@ -72,8 +84,11 @@ let rec string_of_exp = function
 | If (cond,csq,alt) -> sprintf "if %s then %s else %s" (string_of_exp cond) (string_of_exp csq) (string_of_exp alt)
 | Equal (e1,e2) -> sprintf "%s = %s" (string_of_exp e1) (string_of_exp e2)
 and string_of_env env =
+  let pv = function Some v -> string_of_value v | None -> "?" in
+  let pt = function Some t -> string_of_typ   t | None -> "?" in
   sprintf "{%s}" @@ Env.fold (fun k v t acc ->
-    acc ^ k ^ "=(" ^ (string_of_value v) ^ "):" ^ (string_of_typ t) ^ ";") env ""
+    acc ^ k ^ "=(" ^ (pv v) ^ "):(" ^ (pt t) ^ ");"
+  ) env ""
 and string_of_tenv {tenv;_} =
   sprintf "{%s}" @@ Frm.fold (fun k t acc ->
     acc ^ k ^ ":" ^ (string_of_typ t) ^ ";"
@@ -86,17 +101,20 @@ and string_of_value = function
   sprintf "fun_rec(%s)[%s] %s -> %s"
     rname (string_of_env renv)
     rvar (string_of_exp rcont)
+| VUnit -> "()"
 and string_of_typ = function
 | TInt -> "int"
 | TBool -> "bool"
 | TArrow (TArrow _ as u, v) -> sprintf "(%s)->%s" (string_of_typ u) (string_of_typ v)
 | TArrow (u,v) -> sprintf "%s->%s" (string_of_typ u) (string_of_typ v)
 | TVar t -> t
+| TUnit -> "unit"
 
 let string_ast_of_exp =
   let rec lp exp = match exp with
   | LInt _ | LBool _ | Var _ -> string_of_exp exp
   | Let (x,v,body) -> sprintf "Let(%s,%s,%s)" x (lp v) (lp body)
+  | LetGlobal (x,v) -> sprintf "LetG(%s,%s)" x (lp v)
   | LetRec (f,x,v,body) -> sprintf "LetRec(%s,%s,%s,%s)" f x (lp v) (lp body)
   | Fun (var,cont) -> sprintf "Fun(%s,%s)" var (lp cont)
   | App (e1,e2) -> sprintf "App(%s,%s)" (lp e1) (lp e2)
@@ -116,6 +134,7 @@ let rec subst_ty t theta = (* substantiate t using theta *)
   | TVar x -> (match Frm.find_opt x theta with
     | Some t -> t
     | None -> TVar x)
+  | TUnit -> TUnit
 let rec subst_tfrm theta_new frm = (* rewrite frm *)
   Frm.map (fun t -> subst_ty t theta_new) frm
 let compose_subst theta_new theta = (* rewrite + add what is only in theta_new *)
@@ -156,6 +175,7 @@ let new_tvar x =
 let rec typeinf =
   let theta_def = Frm.empty in
   fun exp env ->
+  let env_def = env in
   match exp with
   | LInt _  -> (env,TInt,theta_def)
   | LBool _ -> (env,TBool,theta_def)
@@ -168,9 +188,9 @@ let rec typeinf =
     let env,t2,th2 = typeinf e2 env in
     let t1' = subst_ty t1 th2 in (* simplify t1 using th2 *)
     let th3 = unify [t1',TInt; t2,TInt] in (* typecheck *)
-    let env = {env with tenv=subst_tfrm th3 env.tenv} in (* rewrite tenv using th3 *)
+    (* let env = {env with tenv=subst_tfrm th3 env.tenv} in (* rewrite tenv using th3 *) *)
     let th4 = compose_subst th3 (compose_subst th2 th1) (* compose th1,th2,th3 *)
-    in (env,TInt,th4)
+    in (env_def,TInt,th4)
   | If (cond,csq,alt) ->
     let env,t1,th1 = typeinf cond env in
     let th90 = unify [t1,TBool] in
@@ -182,15 +202,15 @@ let rec typeinf =
     let th91 = unify [t2,t3] in
     let th = compose_subst th91 (compose_subst th90 (compose_subst th3 (compose_subst th2 th1))) in
     let t2' = subst_ty t2 th in
-    let env = {env with tenv=subst_tfrm th env.tenv} in
-    (env,t2',th)
+    (* let env = {env with tenv=subst_tfrm th env.tenv} in *)
+    (env_def,t2',th)
   | Fun (x,e) ->
     let t = new_tvar x in
     let env = {env with tenv=Frm.add x t env.tenv} in (* define/undefine x in order to evaluate e *)
     let env,t1,th1 = typeinf e env in
     let t' = subst_ty t th1 in
-    let env = {env with tenv=Frm.remove x env.tenv} in
-    (env,TArrow(t',t1),th1)
+    (* let env = {env with tenv=Frm.remove x env.tenv} in *)
+    (env_def,TArrow(t',t1),th1)
   | App (e1,e2) ->
     let env,t1,th1 = typeinf e1 env in
     let env,t2,th2 = typeinf e2 env in
@@ -198,27 +218,33 @@ let rec typeinf =
     let t1' = subst_ty t1 th2 in
     let th3 = unify [t1',TArrow(t2,t)] in (* exist t s.t. t1 = t2->t ? *)
     let t'  = subst_ty t th3 in
-    let env = {env with tenv=subst_tfrm th3 env.tenv} in
+    (* let env = {env with tenv=subst_tfrm th3 env.tenv} in *)
     let th4 = compose_subst th3 (compose_subst th2 th1) in
-    (env,t',th4)
+    (env_def,t',th4)
   | Equal (e1,e2) ->
     let env,t1,th1 = typeinf e1 env in
     let env,t2,th2 = typeinf e2 env in
     let t1' = subst_ty t1 th2 in
     let th3 = unify [t1',t2] in
     let th4 = compose_subst th3 (compose_subst th2 th1) in
-    (env,TBool,th4)
+    (env_def,TBool,th4)
   | Let (x,v,body) ->
     let env,t1,th1 = typeinf v env in
     let env = {env with tenv=Frm.add x t1 env.tenv} in
     let env,t2,th2 = typeinf body env in
-    let env = {env with tenv=Frm.remove x env.tenv} in
+    (* let env = {env with tenv=Frm.remove x env.tenv} in *)
     let th3 = compose_subst th2 th1 in
-    (env,t2,th3)
+    (env_def,t2,th3)
+  | LetGlobal (x,v) ->
+    let env,t1,th1 = typeinf v env in
+    let env = {env with tenv=Frm.add x t1 env.tenv} in
+    (env,TUnit,th1)
   | LetRec (f,x,v,body) as lr ->
-    fst @@ typeinf_lrec lr env
+    let env,t,th = fst @@ typeinf_lrec lr env
+    in env_def,t,th
 and typeinf_lrec exp env = match exp with
   | LetRec (f,x,v,body) ->
+    let env_def = env in
     let tx = new_tvar x in
     let tv = new_tvar "v" in
     let tf = TArrow (tx,tv) in
@@ -237,75 +263,89 @@ and typeinf_lrec exp env = match exp with
     let thr = compose_subst th2 (compose_subst th1 thr) in
     let tf = subst_ty tf thr in
     let tb = subst_ty tb thr in
-    let env = {env with tenv=Frm.remove x @@ Frm.remove f env.tenv} in
-    let env = {env with tenv=subst_tfrm thr env.tenv} in
-    (env,tb,thr),tf
+    (* let env = {env with tenv=Frm.remove x @@ Frm.remove f env.tenv} in
+    let env = {env with tenv=subst_tfrm thr env.tenv} in *)
+    (env_def,tb,thr),tf
   | _ -> raise @@ Invalid_argument "typeinf_lrec"
 
 
-let rec eval exp (env:env) = match exp with
-| LInt v -> VInt v
-| LBool b -> VBool b
-| Var x -> Frm.find x env.venv
-| Let (x,v,body) ->
+let rec eval exp (env:env) : ret =
+  let rec eval_noext exp env : value = match exp with
+  | LetGlobal _ -> failwith "eval_noext doesnt extend env"
+  | LInt v -> VInt v
+  | LBool b -> VBool b
+  | Var x -> Frm.find x env.venv
+  | Let (x,v,body) ->
+    let env,t,_ = typeinf v env in
+    let v = eval_noext v env in
+    let env' = Env.add x v t env in
+    eval_noext body env'
+  | LetRec (f,x,v,body) as lrec ->
+    let _,tf = typeinf_lrec lrec env in
+    let env' = Env.add f
+      (VProcRec {rname=f; rvar=x; rcont=v; renv=env}) tf env in
+    eval_noext body env'
+  | Fun (var,cont) -> VProc {var; cont; env}
+  | App (e1,e2) -> (
+    let env,ftyp,_  = typeinf e1 env in
+    let env,vtyp,_  = typeinf e2 env in
+    let func  = eval_noext e1 env in
+    let value = eval_noext e2 env in
+    match func with
+    | VProc {var;cont;env} ->
+      eval_noext  cont @@ Env.add var value vtyp env
+    | VProcRec {rvar; rcont; renv; rname} ->
+      eval_noext rcont @@ Env.add rvar value vtyp @@ Env.add rname func ftyp renv
+    | e -> failwith @@ sprintf "not a function: %s" (string_of_value e))
+  | LOpAdd (e1,e2) -> (match eval_noext e1 env, eval_noext e2 env with
+    | VInt u,VInt v -> VInt (u+v)
+    | _ -> raise TypeError)
+  | LOpSub (e1,e2) -> (match eval_noext e1 env, eval_noext e2 env with
+    | VInt u,VInt v -> VInt (u-v)
+    | _ -> raise TypeError)
+  | LOpMul (e1,e2) -> (match eval_noext e1 env, eval_noext e2 env with
+    | VInt u,VInt v -> VInt (u*v)
+    | _ -> raise TypeError)
+  | If (cond, csq, alt) -> (match eval_noext cond env with
+    | VBool true  -> eval_noext csq env
+    | VBool false -> eval_noext alt env
+    | _ -> raise TypeError)
+  | Equal (e1,e2) -> (match eval_noext e1 env, eval_noext e2 env with
+    | VInt  u,VInt  v -> VBool (u=v)
+    | VBool u,VBool v -> VBool (u=v)
+    | VProc _,VProc _
+    | VProcRec _,VProcRec _
+      -> failwith "do not compare functions"
+    | _ -> raise TypeError)
+  in
+  match exp with
+| LetGlobal (x,v) ->
   let env,t,_ = typeinf v env in
-  let v = eval v env in
-  let env' = Env.add x v t env in
-  eval body env'
-| LetRec (f,x,v,body) as lrec ->
-  let _,tf = typeinf_lrec lrec env in
-  let env' = Env.add f
-    (VProcRec {rname=f; rvar=x; rcont=v; renv=env}) tf env in
-  eval body env'
-| Fun (var,cont) -> VProc {var; cont; env}
-| App (e1,e2) -> (
-  let env,ftyp,_  = typeinf e1 env in
-  let env,vtyp,_  = typeinf e2 env in
-  let func  = eval e1 env in
-  let value = eval e2 env in
-  match func with
-  | VProc {var;cont;env} ->
-    eval  cont @@ Env.add var value vtyp env
-  | VProcRec {rvar; rcont; renv; rname} ->
-    eval rcont @@ Env.add rvar value vtyp @@ Env.add rname func ftyp renv
-  | e -> failwith @@ sprintf "not a function: %s" (string_of_value e))
-| LOpAdd (e1,e2) -> (match eval e1 env, eval e2 env with
-  | VInt u,VInt v -> VInt (u+v)
-  | _ -> raise TypeError)
-| LOpSub (e1,e2) -> (match eval e1 env, eval e2 env with
-  | VInt u,VInt v -> VInt (u-v)
-  | _ -> raise TypeError)
-| LOpMul (e1,e2) -> (match eval e1 env, eval e2 env with
-  | VInt u,VInt v -> VInt (u*v)
-  | _ -> raise TypeError)
-| If (cond, csq, alt) -> (match eval cond env with
-  | VBool true  -> eval csq env
-  | VBool false -> eval alt env
-  | _ -> raise TypeError)
-| Equal (e1,e2) -> (match eval e1 env,eval e2 env with
-  | VInt  u,VInt  v -> VBool (u=v)
-  | VBool u,VBool v -> VBool (u=v)
-  | VProc _,VProc _
-  | VProcRec _,VProcRec _
-    -> failwith "do not compare functions"
-  | _ -> raise TypeError)
+  let v = eval_noext v env in
+  let env' = Env.add x v t env in VUnit, env'
+| _ as exp -> eval_noext exp env, env
 
-let interpret ?(loop=false) ls0 =
-  let string_of_typeinf_res exp =
-    let env,typ,th = typeinf exp Env.empty in
+let interpret ?(loop=false) env ls0 =
+  let string_of_typeinf_res exp env =
+    let env,typ,th = typeinf exp env in
     sprintf "  typ : %s
   th  : %s
   tenv : %s" (string_of_typ typ) (Frm.sprint string_of_typ th) (string_of_tenv env)
   in
-  List.iter (fun ls ->
-    List.iter (fun exp ->
+  List.fold_left (fun env ls ->
+    List.fold_left (fun env exp ->
       Printf.(
         if not loop then printf "%s\n%!" @@ string_of_exp exp;
         printf "%s\n%!" @@ string_ast_of_exp exp;
-        printf "%s\n%!" @@ string_of_typeinf_res exp;
-        printf "-> %s\n\n%!" @@ string_of_value @@ eval exp Env.empty;
+        printf "%s\n%!" @@ string_of_typeinf_res exp env;
+        (* printf "%s\n%!" @@ string_of_env env; *)
+        let value,env = eval exp env in
+        printf "-> %s\n%!" @@ string_of_value @@ value;
+        (* printf "%s\n%!" @@ string_of_env env; *)
+        printf "\n%!";
+        env
       )
-    ) ls) ls0
+    ) env ls) env ls0
 
 
 

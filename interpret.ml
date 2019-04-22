@@ -6,8 +6,10 @@ let rec parse lexbuf =
   | Some v -> v :: (parse lexbuf)
   | None -> []
 
-let interpret ?(loop=false) =
-  Lexing.from_string *> parse *> Eval.interpret ~loop
+let env_global = ref Eval.Env.empty
+
+let interpret ?(loop=false) str =
+  env_global := Lexing.from_string *> parse *> Eval.interpret ~loop !env_global @@ str
 
 let interpreter ic =
   let rec loop input =
@@ -31,5 +33,11 @@ let () =
     let rec f x = if x = 0 then 0 else x + f (x-1) in f;;
     let rec f x = let rec g a = if x=0 then a else f (x-1) (a+x) in g in f (* tail recursive *);;
     let rec f x = let rec g a = if x=0 then a else f (x-1) (a+x) in g in f 10 0;;
+  |};
+  interpret {|
+    let x = 42;;
+    let sum = fun x -> let rec f x = let rec g a = if x=0 then a else f (x-1) (a+x) in g in f x 0 (* sum 1...x *);;
+    let result = x + sum 10;;
+    result;;
   |};
   interpreter stdin

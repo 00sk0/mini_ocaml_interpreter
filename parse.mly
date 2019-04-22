@@ -4,6 +4,7 @@
 %token PLUS MINUS LET EQUAL IN FUN RARROW REC IF THEN ELSE TRUE FALSE ASTERISK SEMICOL
 
 /* low priority */
+%nonassoc LETG
 %nonassoc RARROW IN ELSE
 /* %left SEMICOL */
 %left EQUAL
@@ -41,6 +42,7 @@ exp:
   | func=exp arg=arg_exp        {Eval.App (func,arg)}
   | FUN x=VARIABLE RARROW body=exp  {Eval.Fun (x,body)}
   | LET x=VARIABLE EQUAL v=exp IN body=exp  {Eval.Let (x,v,body)}
+  | LET x=VARIABLE EQUAL v=exp %prec LETG {Eval.LetGlobal (x,v)}
   | LET REC f=VARIABLE x=VARIABLE EQUAL v=exp IN body=exp {Eval.LetRec (f,x,v,body)}
   | IF cond=exp THEN csq=exp ELSE alt=exp {Eval.If (cond,csq,alt)}
 ;
