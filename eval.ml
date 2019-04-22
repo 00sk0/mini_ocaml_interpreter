@@ -1,5 +1,6 @@
 exception VariableNotFound of string
 exception TypeError
+external ident : 'a -> 'a = "%identity"
 let sprintf = Printf.sprintf
 
 module Frm = struct
@@ -62,7 +63,7 @@ module Env = struct
     | Some v, Some t -> Some (Some v, Some t)
     | Some v, None   -> Some (Some v, None)
     | None,   Some t -> Some (None,   Some t)
-    | None,   None   -> Some (None,   None)
+    | None,   None   -> None
     ) venv tenv in
     Frm.fold (fun key (ov,ot) acc ->
       f key ov ot acc
@@ -175,7 +176,6 @@ let new_tvar x =
 let rec typeinf =
   let theta_def = Frm.empty in
   fun exp env ->
-  let env_def = env in
   match exp with
   | LInt _  -> (env,TInt,theta_def)
   | LBool _ -> (env,TBool,theta_def)
@@ -190,7 +190,7 @@ let rec typeinf =
     let th3 = unify [t1',TInt; t2,TInt] in (* typecheck *)
     (* let env = {env with tenv=subst_tfrm th3 env.tenv} in (* rewrite tenv using th3 *) *)
     let th4 = compose_subst th3 (compose_subst th2 th1) (* compose th1,th2,th3 *)
-    in (env_def,TInt,th4)
+    in (env,TInt,th4)
   | If (cond,csq,alt) ->
     let env,t1,th1 = typeinf cond env in
     let th90 = unify [t1,TBool] in
@@ -202,15 +202,20 @@ let rec typeinf =
     let th91 = unify [t2,t3] in
     let th = compose_subst th91 (compose_subst th90 (compose_subst th3 (compose_subst th2 th1))) in
     let t2' = subst_ty t2 th in
-    (* let env = {env with tenv=subst_tfrm th env.tenv} in *)
-    (env_def,t2',th)
+    let env = {env with tenv=subst_tfrm th env.tenv} in
+    (env,t2',th)
   | Fun (x,e) ->
     let t = new_tvar x in
+    let xt_prev = Frm.find_opt x env.tenv in
     let env = {env with tenv=Frm.add x t env.tenv} in (* define/undefine x in order to evaluate e *)
     let env,t1,th1 = typeinf e env in
     let t' = subst_ty t th1 in
-    (* let env = {env with tenv=Frm.remove x env.tenv} in *)
-    (env_def,TArrow(t',t1),th1)
+    let env = {env with tenv=
+      (match xt_prev with
+      | Some xt -> Frm.add x xt
+      | None -> ident
+      ) @@ Frm.remove x env.tenv} in
+    (env,TArrow(t',t1),th1)
   | App (e1,e2) ->
     let env,t1,th1 = typeinf e1 env in
     let env,t2,th2 = typeinf e2 env in
@@ -218,33 +223,35 @@ let rec typeinf =
     let t1' = subst_ty t1 th2 in
     let th3 = unify [t1',TArrow(t2,t)] in (* exist t s.t. t1 = t2->t ? *)
     let t'  = subst_ty t th3 in
-    (* let env = {env with tenv=subst_tfrm th3 env.tenv} in *)
+    let env = {env with tenv=subst_tfrm th3 env.tenv} in
     let th4 = compose_subst th3 (compose_subst th2 th1) in
-    (env_def,t',th4)
+    (env,t',th4)
   | Equal (e1,e2) ->
     let env,t1,th1 = typeinf e1 env in
     let env,t2,th2 = typeinf e2 env in
     let t1' = subst_ty t1 th2 in
     let th3 = unify [t1',t2] in
     let th4 = compose_subst th3 (compose_subst th2 th1) in
-    (env_def,TBool,th4)
+    (env,TBool,th4)
   | Let (x,v,body) ->
     let env,t1,th1 = typeinf v env in
     let env = {env with tenv=Frm.add x t1 env.tenv} in
     let env,t2,th2 = typeinf body env in
-    (* let env = {env with tenv=Frm.remove x env.tenv} in *)
+    let env = {env with tenv=Frm.remove x env.tenv} in
     let th3 = compose_subst th2 th1 in
-    (env_def,t2,th3)
+    (env,t2,th3)
   | LetGlobal (x,v) ->
     let env,t1,th1 = typeinf v env in
     let env = {env with tenv=Frm.add x t1 env.tenv} in
     (env,TUnit,th1)
   | LetRec (f,x,v,body) as lr ->
     let env,t,th = fst @@ typeinf_lrec lr env
-    in env_def,t,th
+    in env,t,th
 and typeinf_lrec exp env = match exp with
   | LetRec (f,x,v,body) ->
-    let env_def = env in
+    let tx_prev = Frm.find_opt x env.tenv in
+    let fx_prev = Frm.find_opt f env.tenv in
+
     let tx = new_tvar x in
     let tv = new_tvar "v" in
     let tf = TArrow (tx,tv) in
@@ -256,16 +263,28 @@ and typeinf_lrec exp env = match exp with
     let thr = compose_subst th1 th2 in
     let tf = subst_ty tf thr in
     let tb = subst_ty tb thr in
-    let env = {env with tenv=Frm.add x tx @@ Frm.add f tf env.tenv} in
+
+    (* x cannot be refered from body
+       since let rec f x = <v> in <body> *)
+    let env = {env with tenv=Frm.add f tf env.tenv} in
+    let env = {env with tenv=(match tx_prev with
+    | Some tx -> Frm.add x tx | None -> ident)
+    @@ Frm.remove x env.tenv} in
 
     let env,tb2,th1 = typeinf body env in
     let th2 = unify [tb,tb2] in
     let thr = compose_subst th2 (compose_subst th1 thr) in
     let tf = subst_ty tf thr in
     let tb = subst_ty tb thr in
-    (* let env = {env with tenv=Frm.remove x @@ Frm.remove f env.tenv} in
-    let env = {env with tenv=subst_tfrm thr env.tenv} in *)
-    (env_def,tb,thr),tf
+
+    let env = {env with tenv=Frm.remove f env.tenv} in
+    let env = {env with tenv=(
+      match fx_prev with
+      | Some fx -> Frm.add f fx | None -> ident
+      ) @@ env.tenv
+    } in
+    let env = {env with tenv=subst_tfrm thr env.tenv} in
+    (env,tb,thr),tf
   | _ -> raise @@ Invalid_argument "typeinf_lrec"
 
 
@@ -320,17 +339,17 @@ let rec eval exp (env:env) : ret =
   in
   match exp with
 | LetGlobal (x,v) ->
-  let env,t,_ = typeinf v env in
-  let v = eval_noext v env in
-  let env' = Env.add x v t env in VUnit, env'
+  let env_def = env in
+  let _,t,_ = typeinf v env in
+  let v = eval_noext v env_def in
+  let env' = Env.add x v t env_def in VUnit, env'
 | _ as exp -> eval_noext exp env, env
 
 let interpret ?(loop=false) env ls0 =
   let string_of_typeinf_res exp env =
     let env,typ,th = typeinf exp env in
     sprintf "  typ : %s
-  th  : %s
-  tenv : %s" (string_of_typ typ) (Frm.sprint string_of_typ th) (string_of_tenv env)
+  th  : %s" (string_of_typ typ) (Frm.sprint string_of_typ th)
   in
   List.fold_left (fun env ls ->
     List.fold_left (fun env exp ->
@@ -340,6 +359,8 @@ let interpret ?(loop=false) env ls0 =
         printf "%s\n%!" @@ string_of_typeinf_res exp env;
         (* printf "%s\n%!" @@ string_of_env env; *)
         let value,env = eval exp env in
+        printf "  tenv : %s\n%!" (string_of_tenv env);
+        (* printf "  env : %s\n%!" (string_of_env env); *)
         printf "-> %s\n%!" @@ string_of_value @@ value;
         (* printf "%s\n%!" @@ string_of_env env; *)
         printf "\n%!";

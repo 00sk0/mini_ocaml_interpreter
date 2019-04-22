@@ -54,18 +54,26 @@ Reference: http://logic.cs.tsukuba.ac.jp/jikken/index.html
 * experimental: add global let
   ```bash
   let x = 42;;
-  ...
+    typ : unit
+    th  : ...
+    tenv : {x:int;}
   -> ()
 
   let sum = fun x -> let rec f x = let rec g a = if x=0 then a else f (x-1) (a+x) in g in f x 0 (* sum 1...x *);;
-  ...
+    typ : unit
+    th  : ...
+    tenv : {sum:int->int;x:int;}
   -> ()
 
   let result = x + sum 10;;
-  ...
+    typ : unit
+    th  : ...
+    tenv : {result:int;sum:int->int;x:int;}
   -> ()
 
   result;;
-  ...
+    typ : int
+    th  : ...
+    tenv : {result:int;sum:int->int;x:int;}
   -> 97
   ```
