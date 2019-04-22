@@ -5,7 +5,7 @@
 }
 
 let number_pos = ['0'-'9']+
-let number_neg = '(' '-'? ['0'-'9']+ ')'
+let number_neg = '(' '-' ['0'-'9']+ ')'
 let digit  = ['0'-'9']
 let string = '\"' ([^ '\\' '\"'] | '\\'_ )* '\"'
 let var = ['a'-'z']['a'-'z' '0'-'9' '_']*
