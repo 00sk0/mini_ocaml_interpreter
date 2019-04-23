@@ -25,6 +25,13 @@ let interpreter ic =
       loop ""
   in loop ""
 
+let read_stdlib () =
+  let ic = open_in "./stdlib/library.ml" in
+  let str = really_input_string ic (in_channel_length ic)
+  in
+  interpret str;
+  close_in ic
+
 let () =
   interpret {|
     (1 + 2 * 3) * 6;;
@@ -39,5 +46,9 @@ let () =
     let sum = fun x -> let rec f x = let rec g a = if x=0 then a else f (x-1) (a+x) in g in f x 0 (* sum 1...x *);;
     let result = x + sum 10;;
     result;;
+  |};
+  read_stdlib ();
+  interpret {|
+    pow 2 10;; (* utilize stdlib *)
   |};
   interpreter stdin
