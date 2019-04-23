@@ -16,6 +16,7 @@ type exp =
 | LInt of int
 | LBool of bool
 | Var of string
+| LUnit
 | Let of (string * exp * exp)
 | LetGlobal of (string * exp)
 | LetRec of (string * string * exp * exp)
@@ -76,6 +77,7 @@ let rec string_of_exp = function
 | LInt n -> string_of_int n
 | LBool b -> string_of_bool b
 | Var x -> x
+| LUnit -> "()"
 | Let (x,v,body) -> sprintf "let %s = %s in %s" x (string_of_exp v) (string_of_exp body)
 | LetGlobal (x,v) -> sprintf "let %s = %s" x (string_of_exp v)
 | LetRec (f,x,v,body) -> sprintf "let rec %s %s = %s in %s" f x (string_of_exp v) (string_of_exp body)
@@ -120,6 +122,7 @@ let string_ast_of_exp =
   | LInt v -> sprintf "LInt(%s)" @@ string_of_int v
   | LBool v -> sprintf "LBool(%s)" @@ string_of_bool v
   | Var v -> sprintf "Var (%s)" @@ v
+  | LUnit -> "LUnit"
   | Let (x,v,body) -> sprintf "Let(%s,%s,%s)" x (lp v) (lp body)
   | LetGlobal (x,v) -> sprintf "LetGlobal(%s,%s)" x (lp v)
   | LetRec (f,x,v,body) -> sprintf "LetRec(%s,%s,%s,%s)" f x (lp v) (lp body)
@@ -191,6 +194,7 @@ let rec typeinf =
     | Some t1 -> (env,t1,theta_def)
     | None ->
       failwith @@ "variable " ^ x ^ " not found")
+  | LUnit -> (env,TUnit,theta_def)
   | LOpAdd (e1,e2) | LOpMul (e1,e2) | LOpSub (e1,e2) | LOpDiv (e1,e2) ->
     let env,t1,th1 = typeinf e1 env in
     let env,t2,th2 = typeinf e2 env in
@@ -302,6 +306,7 @@ let rec eval exp (env:env) : ret =
   | LInt v -> VInt v
   | LBool b -> VBool b
   | Var x -> Frm.find x env.venv
+  | LUnit -> VUnit
   | Let (x,v,body) ->
     let env,t,_ = typeinf v env in
     let v = eval_noext v env in

@@ -32,6 +32,7 @@ arg_exp:
   | TRUE        {Eval.LBool true}
   | FALSE       {Eval.LBool false}
   | LEFT_PAREN exp=exp RIGHT_PAREN  {exp}
+  | LEFT_PAREN RIGHT_PAREN {Eval.LUnit}
 ;
 exp:
   | e=arg_exp   {e}
