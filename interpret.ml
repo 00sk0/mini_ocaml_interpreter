@@ -6,7 +6,7 @@ let rec parse lexbuf =
   | Some v -> v :: (parse lexbuf)
   | None -> []
 
-let env_global = ref Eval.Env.empty
+let env_global = Eval.create_env ()
 
 let interpret ?(loop=false) str =
   env_global := Lexing.from_string *> parse *> Eval.interpret ~loop !env_global @@ str

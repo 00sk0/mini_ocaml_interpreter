@@ -24,8 +24,10 @@ type exp =
 | LOpAdd of (exp * exp)
 | LOpSub of (exp * exp)
 | LOpMul of (exp * exp)
+| LOpDiv of (exp * exp)
 | If of (exp * exp * exp)
 | Equal of (exp * exp)
+| LessT of (exp * exp)
 and value =
 | VInt of int
 | VBool of bool
@@ -82,8 +84,10 @@ let rec string_of_exp = function
 | LOpAdd (e1,e2) -> sprintf "%s + %s" (string_of_exp e1) (string_of_exp e2)
 | LOpSub (e1,e2) -> sprintf "%s - %s" (string_of_exp e1) (string_of_exp e2)
 | LOpMul (e1,e2) -> sprintf "(%s) * (%s)" (string_of_exp e1) (string_of_exp e2)
+| LOpDiv (e1,e2) -> sprintf "(%s) / (%s)" (string_of_exp e1) (string_of_exp e2)
 | If (cond,csq,alt) -> sprintf "if %s then %s else %s" (string_of_exp cond) (string_of_exp csq) (string_of_exp alt)
 | Equal (e1,e2) -> sprintf "%s = %s" (string_of_exp e1) (string_of_exp e2)
+| LessT (e1,e2) -> sprintf "%s < %s" (string_of_exp e1) (string_of_exp e2)
 and string_of_env env =
   let pv = function Some v -> string_of_value v | None -> "?" in
   let pt = function Some t -> string_of_typ   t | None -> "?" in
@@ -113,17 +117,21 @@ and string_of_typ = function
 
 let string_ast_of_exp =
   let rec lp exp = match exp with
-  | LInt _ | LBool _ | Var _ -> string_of_exp exp
+  | LInt v -> sprintf "LInt(%s)" @@ string_of_int v
+  | LBool v -> sprintf "LBool(%s)" @@ string_of_bool v
+  | Var v -> sprintf "Var (%s)" @@ v
   | Let (x,v,body) -> sprintf "Let(%s,%s,%s)" x (lp v) (lp body)
-  | LetGlobal (x,v) -> sprintf "LetG(%s,%s)" x (lp v)
+  | LetGlobal (x,v) -> sprintf "LetGlobal(%s,%s)" x (lp v)
   | LetRec (f,x,v,body) -> sprintf "LetRec(%s,%s,%s,%s)" f x (lp v) (lp body)
   | Fun (var,cont) -> sprintf "Fun(%s,%s)" var (lp cont)
   | App (e1,e2) -> sprintf "App(%s,%s)" (lp e1) (lp e2)
   | LOpAdd (e1,e2) -> sprintf "Add(%s,%s)" (lp e1) (lp e2)
   | LOpSub (e1,e2) -> sprintf "Sub(%s,%s)" (lp e1) (lp e2)
   | LOpMul (e1,e2) -> sprintf "Mul(%s,%s)" (lp e1) (lp e2)
+  | LOpDiv (e1,e2) -> sprintf "Div(%s,%s)" (lp e1) (lp e2)
   | If (cond,csq,alt) -> sprintf "IF(%s,%s,%s)" (lp cond) (lp csq) (lp alt)
-  | Equal (e1,e2) -> sprintf "%s = %s" (lp e1) (lp e2)
+  | Equal (e1,e2) -> sprintf "Equal(%s,%s)" (lp e1) (lp e2)
+  | LessT (e1,e2) -> sprintf "LessT(%s,%s)" (lp e1) (lp e2)
   in lp
 
 exception UnifyError
@@ -183,7 +191,7 @@ let rec typeinf =
     | Some t1 -> (env,t1,theta_def)
     | None ->
       failwith @@ "variable " ^ x ^ " not found")
-  | LOpAdd (e1,e2) | LOpMul (e1,e2) | LOpSub (e1,e2) ->
+  | LOpAdd (e1,e2) | LOpMul (e1,e2) | LOpSub (e1,e2) | LOpDiv (e1,e2) ->
     let env,t1,th1 = typeinf e1 env in
     let env,t2,th2 = typeinf e2 env in
     let t1' = subst_ty t1 th2 in (* simplify t1 using th2 *)
@@ -226,7 +234,7 @@ let rec typeinf =
     let env = {env with tenv=subst_tfrm th3 env.tenv} in
     let th4 = compose_subst th3 (compose_subst th2 th1) in
     (env,t',th4)
-  | Equal (e1,e2) ->
+  | Equal (e1,e2) | LessT (e1,e2) ->
     let env,t1,th1 = typeinf e1 env in
     let env,t2,th2 = typeinf e2 env in
     let t1' = subst_ty t1 th2 in
@@ -325,6 +333,9 @@ let rec eval exp (env:env) : ret =
   | LOpMul (e1,e2) -> (match eval_noext e1 env, eval_noext e2 env with
     | VInt u,VInt v -> VInt (u*v)
     | _ -> raise TypeError)
+  | LOpDiv (e1,e2) -> (match eval_noext e1 env, eval_noext e2 env with
+    | VInt u,VInt v -> VInt (u/v)
+    | _ -> raise TypeError)
   | If (cond, csq, alt) -> (match eval_noext cond env with
     | VBool true  -> eval_noext csq env
     | VBool false -> eval_noext alt env
@@ -332,6 +343,13 @@ let rec eval exp (env:env) : ret =
   | Equal (e1,e2) -> (match eval_noext e1 env, eval_noext e2 env with
     | VInt  u,VInt  v -> VBool (u=v)
     | VBool u,VBool v -> VBool (u=v)
+    | VProc _,VProc _
+    | VProcRec _,VProcRec _
+      -> failwith "do not compare functions"
+    | _ -> raise TypeError)
+  | LessT (e1,e2) -> (match eval_noext e1 env, eval_noext e2 env with
+    | VInt  u,VInt  v -> VBool (u<v)
+    | VBool u,VBool v -> VBool (u<v)
     | VProc _,VProc _
     | VProcRec _,VProcRec _
       -> failwith "do not compare functions"
@@ -369,6 +387,29 @@ let interpret ?(loop=false) env ls0 =
     ) env ls) env ls0
 
 
+    let rec pow a n = function
+    | 0 -> a | 1 -> n * a
+    | k when k mod 2 = 0 -> pow a (n*n) (k/2)
+    | k -> pow (a*n) (n*n) (k/2)
+
+let create_env () =
+  let ls = [
+    "abs", Fun("x",
+      If(
+        LessT (Var "x", LInt 0),
+        LOpSub (LInt 0, Var "x"),
+        Var "x"));
+    "ceildiv", Fun ("x", Fun ("y",
+      LOpDiv (
+        LOpAdd (Var "x", LOpSub (Var "y", LInt 1)),
+        Var "y")
+    ));
+  ] in
+  ref @@ List.fold_left (fun env (name,exp) ->
+    let _,t,_ = typeinf exp env in
+    let v,_ = eval exp env in
+    Env.add name v t env
+  ) Env.empty ls
 
 
 

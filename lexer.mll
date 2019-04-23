@@ -19,7 +19,9 @@ rule read = parse
 | '-'         {MINUS}
 | '='         {EQUAL}
 | '*'         {ASTERISK}
+| '/'         {SLASH}
 | ';'         {SEMICOL}
+| '<'         {LT}
 | "let"       {LET}
 | "in"        {IN}
 | "fun"       {FUN}
