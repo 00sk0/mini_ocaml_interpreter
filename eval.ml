@@ -391,31 +391,7 @@ let interpret ?(loop=false) env ls0 =
       )
     ) env ls) env ls0
 
-
-    let rec pow a n = function
-    | 0 -> a | 1 -> n * a
-    | k when k mod 2 = 0 -> pow a (n*n) (k/2)
-    | k -> pow (a*n) (n*n) (k/2)
-
-let create_env () =
-  let ls = [
-    "abs", Fun("x",
-      If(
-        LessT (Var "x", LInt 0),
-        LOpSub (LInt 0, Var "x"),
-        Var "x"));
-    "ceildiv", Fun ("x", Fun ("y",
-      LOpDiv (
-        LOpAdd (Var "x", LOpSub (Var "y", LInt 1)),
-        Var "y")
-    ));
-  ] in
-  ref @@ List.fold_left (fun env (name,exp) ->
-    let _,t,_ = typeinf exp env in
-    let v,_ = eval exp env in
-    Env.add name v t env
-  ) Env.empty ls
-
+let create_env () = ref @@ Env.empty
 
 
 
